@@ -2,13 +2,20 @@
 
 ## TL;DR
 
-If ARM apps under `libhoudini` (build `14.0.0_z.GoogleGame_com1.2`, hpe-14 branch)
-started hanging/crashing after **September 1, 2026**, it's a hardcoded expiration
-check. The known community patch ([Vvamp](https://github.com/Vvamp/Libhoudini-hpe-14-timebomb-patch))
-fixes that — but if you apply it and apps *still* crash with `SIGILL`/`SIGABRT`
-near `libhoudini.so`, you've likely broken houdini's internal symlink-topology
-check by deploying patched files as independent copies instead of preserving
-the stock `/system/lib(64)/` → `/vendor/lib(64)/` symlink structure. See §3–4.
+**If apps that worked fine before — Prime Video, Kodi, SmartTube, or other
+Android apps that need ARM app support on an x86 Android-x86/TV device —
+suddenly started freezing on launch, endlessly loading, or crashing
+outright around September 2026**, the cause is very likely `libhoudini`:
+the compatibility layer that lets ARM-only apps run on x86 Android
+hardware. This layer has a hardcoded expiration date baked into it, and
+once that date passed, it started failing.
+
+The known community patch ([Vvamp](https://github.com/Vvamp/Libhoudini-hpe-14-timebomb-patch))
+fixes that expiration check — but if you apply it and apps *still* crash
+(often with `SIGILL`/`SIGABRT` errors mentioning `libhoudini.so`), there's
+a second, previously undocumented cause: the patch was likely applied in
+a way that breaks a separate internal check inside houdini, unrelated to
+the date. See §3–4 for the full fix.
 
 ## Status of this document
 
