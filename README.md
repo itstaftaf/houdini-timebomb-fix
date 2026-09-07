@@ -8,7 +8,9 @@ suddenly started freezing on launch, endlessly loading, or crashing
 outright around September 2026**, the cause is very likely `libhoudini`:
 the compatibility layer that lets ARM-only apps run on x86 Android
 hardware. This layer has a hardcoded expiration date baked into it, and
-once that date passed, it started failing.
+once that date passed, it started failing. A common tell while stuck on
+the loading screen is one process pegging the CPU well over 100% across
+cores — check `top`/`dumpsys cpuinfo` if you're not sure.
 
 The known community patch ([Vvamp](https://github.com/Vvamp/Libhoudini-hpe-14-timebomb-patch))
 fixes that expiration check — but if you apply it and apps *still* crash
@@ -33,6 +35,8 @@ Everything in section 3 was derived empirically on one specific device/ROM via l
 ### 1.1 Symptom
 
 Apps that previously worked fine under houdini's ARM-on-x86 translation (Disney+, Prime Video, Kodi, SmartTube, etc.) started hanging on a loading/splash screen or crashing outright, on a schedule that lined up with a hardcoded date check ("timebomb") baked into this houdini build. This is a known behavior of certain leaked/ported Intel Houdini builds used on non-Intel-official Android-x86 ROMs and TV boxes.
+
+Affected apps often show sustained high CPU usage (one process consuming well over 100% across multiple cores — 270%+ was observed during this investigation) while stuck on the loading/splash screen, in addition to eventually hanging or crashing outright — worth checking `top`/`dumpsys cpuinfo` if you're unsure whether an app is stuck on this issue.
 
 ### 1.2 Affected build
 
@@ -279,9 +283,24 @@ system/
   lib/libhoudini.so       <- symlink to /vendor/lib/libhoudini.so
 ```
 
+**Recommended: use [`patches/build_module.py`](patches/build_module.py)** to build this automatically instead of packaging it by hand. Point it at the two patched files you produced in section 4.2:
+
+```sh
+python3 patches/build_module.py --lib64 <path-to-patched-64bit-libhoudini.so> --lib32 <path-to-patched-32bit-libhoudini.so>
+```
+
+This outputs a ready-to-flash Magisk/KernelSU module zip (`houdini-timebomb-fix-module.zip` by default, override with `-o`) containing the two patched files at the real `system/vendor/lib(64)/` paths and true symlink entries — not regular-file copies — at the `system/lib(64)/` paths, along with the `module.prop`/`update-binary`/`updater-script` boilerplate the module format needs.
+
+Before handing you the zip, the script **self-verifies its own output**: it actually extracts the zip with `unzip` and confirms with `os.path.islink()`/`readlink()` that the symlink entries really came out as symlinks, not as regular files containing the link-target text (a real failure mode we hit during development — see the note on `create_system` below). If that check fails, the script exits with an error instead of silently handing you a broken zip. One caveat: **on Windows, it can't fully verify this locally** (Windows can't faithfully represent the extraction) and will tell you to re-check the zip on Linux/WSL/the target device instead of claiming false confidence.
+
+<details>
+<summary>Manual/under-the-hood explanation (if you want to build the module by hand, or understand what build_module.py is doing)</summary>
+
 For a KernelSU/Magisk-style module zip, this means the zip needs actual symlink entries (not regular files) at the two `system/lib(64)/libhoudini.so` paths, with the link target stored as the entry's content and the Unix `S_IFLNK` mode bit set in `external_attr` — a plain `zip`/`Compress-Archive` call will not produce this; you need something that writes symlink entries explicitly (e.g. Python's `zipfile` with `ZipInfo.external_attr = (stat.S_IFLNK | 0o777) << 16`).
 
-[`patches/build_module.py`](patches/build_module.py) automates exactly this: point it at your two patched files (`--lib64`/`--lib32`) and it produces a ready-to-flash Magisk/KernelSU module zip with real symlink entries, then self-verifies the result by actually extracting the zip and confirming with `os.path.islink()`/`readlink()` that the symlinks survived — rather than trusting that the write succeeded. (Note: `ZipInfo.create_system` also has to be forced to Unix (`3`) regardless of the OS the script runs on, or `unzip` silently treats the symlink entries as regular files with no error — the script handles this, but it's a sharp edge worth knowing about if you write your own packer.)
+There's a second, easy-to-miss requirement: `ZipInfo.create_system` also has to be forced to Unix (`3`), regardless of what OS the packaging script runs on. Python's `zipfile` defaults this to `0` (MS-DOS/FAT) when run on Windows, and `unzip`/Android's on-device extractor only interpret the upper 16 bits of `external_attr` as unix mode+symlink bits when the entry claims a Unix creator. Get this wrong and the symlink entries silently extract as regular files containing the link-target text, with no error anywhere — exactly the kind of naive-packaging failure section 3 describes, just moved one level up the toolchain. `build_module.py` handles this correctly and its self-verification step exists specifically to catch a regression here.
+
+</details>
 
 Note: module installers may reset the *timestamp* of extracted files to install time rather than preserving whatever mtime you set in the zip. In testing, this did not matter — topology (symlink vs. independent file) was the operative variable, not mtime — but if you're troubleshooting a build where this fix doesn't fully resolve things, mtime divergence from the stock `2009-01-01`-style reproducible-build timestamp is worth checking next.
 
