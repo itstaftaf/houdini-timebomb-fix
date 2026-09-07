@@ -281,6 +281,8 @@ system/
 
 For a KernelSU/Magisk-style module zip, this means the zip needs actual symlink entries (not regular files) at the two `system/lib(64)/libhoudini.so` paths, with the link target stored as the entry's content and the Unix `S_IFLNK` mode bit set in `external_attr` — a plain `zip`/`Compress-Archive` call will not produce this; you need something that writes symlink entries explicitly (e.g. Python's `zipfile` with `ZipInfo.external_attr = (stat.S_IFLNK | 0o777) << 16`).
 
+[`patches/build_module.py`](patches/build_module.py) automates exactly this: point it at your two patched files (`--lib64`/`--lib32`) and it produces a ready-to-flash Magisk/KernelSU module zip with real symlink entries, then self-verifies the result by actually extracting the zip and confirming with `os.path.islink()`/`readlink()` that the symlinks survived — rather than trusting that the write succeeded. (Note: `ZipInfo.create_system` also has to be forced to Unix (`3`) regardless of the OS the script runs on, or `unzip` silently treats the symlink entries as regular files with no error — the script handles this, but it's a sharp edge worth knowing about if you write your own packer.)
+
 Note: module installers may reset the *timestamp* of extracted files to install time rather than preserving whatever mtime you set in the zip. In testing, this did not matter — topology (symlink vs. independent file) was the operative variable, not mtime — but if you're troubleshooting a build where this fix doesn't fully resolve things, mtime divergence from the stock `2009-01-01`-style reproducible-build timestamp is worth checking next.
 
 ### 4.4 Verification
